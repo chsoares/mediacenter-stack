@@ -1,5 +1,3 @@
-version: "3.8"
-
 networks:
   media-network:
     name: media-network
@@ -12,7 +10,7 @@ services:
   ##  Documentation:          https://github.com/qdm12/gluetun-wiki
   ###########################################################################
   gluetun:
-    image: qmcgaw/gluetun:v3.35.0
+    image: qmcgaw/gluetun:latest # Changed to :latest
     container_name: gluetun
     restart: always
     cap_add:
@@ -42,22 +40,28 @@ services:
       - FIREWALL_OUTBOUND_SUBNETS=${LOCAL_SUBNET:?err}
       - OPENVPN_CUSTOM_CONFIG=${OPENVPN_CUSTOM_CONFIG}
       - VPN_TYPE=${VPN_TYPE}
-      - VPN_ENDPOINT_IP=${VPN_ENDPOINT_IP}
-      - VPN_ENDPOINT_PORT=${VPN_ENDPOINT_PORT}
+      #- VPN_ENDPOINT_IP=${VPN_ENDPOINT_IP}
+      #- VPN_ENDPOINT_PORT=${VPN_ENDPOINT_PORT}
       - WIREGUARD_PUBLIC_KEY=${WIREGUARD_PUBLIC_KEY}
       - WIREGUARD_PRIVATE_KEY=${WIREGUARD_PRIVATE_KEY}
       - WIREGUARD_PRESHARED_KEY=${WIREGUARD_PRESHARED_KEY}
       - WIREGUARD_ADDRESSES=${WIREGUARD_ADDRESSES}
+      #- VPN_ENDPOINT_IP_RESOLVER=auto # Added to use VPN's DNS
+      - DNS_ADDRESSES=${DNS_ADDRESSES} # Added to use DNS from .env (Windscribe)
+      - DOT_BLOCKING=off # Temporarily disable DNS over TLS blocking for testing
+      - DOT_SERVERS=cloudflare # Added to ensure DoT server is specified
+      - DOT_LISTEN_PORTS=53 # Ensure DoT listens on port 53 if needed
       # - HTTPPROXY=on # Commented out to avoid 8888 conflict by default
       # - SHADOWSOCKS=on # Commented out to avoid 8388 conflict by default
 
     networks:
       - media-network
-    healthcheck: # Added healthcheck for better dependency management
-      test: ["CMD", "/gluetun/healthcheck"]
+    healthcheck: 
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:9999/health || exit 1"] 
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 60s
 
   ###########################################################################
   ##  Docker Compose File:  qBittorrent (LinuxServer.io)
@@ -130,22 +134,22 @@ services:
       - media-network
 
   ###########################################################################
-  ##  Docker Compose File:  Overseerr (sct)
+  ##  Docker Compose File:  Overseerr (LinuxServer.io Fork)
   ##  Function:             Media Request Manager (for Plex/Emby/Jellyfin)
-  ##  Documentation:        https://docs.overseerr.dev/getting-started/docker
+  ##  Documentation:        https://docs.linuxserver.io/images/docker-overseerr
   ###########################################################################
   overseerr:
-    image: sct/overseerr:latest # Using the official Overseerr image
+    image: lscr.io/linuxserver/overseerr:latest # Using the LinuxServer.io image
     container_name: overseerr
     restart: unless-stopped
     volumes:
-      - "${CONFIG_ROOT}/overseerr:/app/config" # Mapped to /srv/mediacenter/config/overseerr
+      - "${CONFIG_ROOT}/overseerr:/config" # Corrected config path for LSIO images
     ports:
       - "${WEBUI_PORT_OVERSEERR:?err}:5055" # Default Overseerr Web UI port
     environment:
       - PUID=${PUID:?err}
       - PGID=${PGID:?err}
-      - UMASK_SET=${UMASK:?err} # Overseerr uses UMASK_SET instead of UMASK
+      - UMASK=${UMASK:?err} # Corrected UMASK variable name for LSIO images
       - TZ=${TIMEZONE:?err}
     networks:
       - media-network
@@ -298,7 +302,7 @@ services:
       - UN_LIDARR_0_PATHS_0=/data/downloads/complete # Point to where completed downloads are
       - UN_LIDARR_0_PROTOCOLS=torrent
     security_opt:
-      - no-new-privileges:true
+      - no-new-privileges=true # Corrected syntax
     # This container does not need Internet access, it only interacts with other containers locally
     network_mode: none # This is fine if it only talks to the *ARR apps via API calls, which it does.
     # If Unpackerr needed internet access, it would use media-network
@@ -320,13 +324,6 @@ services:
       - TZ=${TIMEZONE:?err}
       - WATCHTOWER_POLL_INTERVAL=21600 # Check for updates every 6 hours (60 * 60 * 6 = 21600 seconds)
       - WATCHTOWER_CLEANUP=true # Remove old images after update
-      - WATCHTOWER_NOTIFICATIONS=none # No notifications for now
-      # - WATCHTOWER_INCLUDE_RESTARTING=true # Optional: include containers currently restarting
-      # - WATCHTOWER_LABEL_ENABLE=true # Only update containers with the label com.centurylinklabs.watchtower.enable=true
-      # - WATCHTOWER_NO_STARTUP_MESSAGE=true # Suppress startup message
-      # - WATCHTOWER_DEBUG=false
-    # You might expose this for metrics, but not strictly necessary for basic function
-    # ports:
-    #   - "${WEBUI_PORT_WATCHTOWER:?err}:8080" # If Watchtower's default port 8080 is for metrics/API
+      # - WATCHTOWER_NOTIFICATIONS=none # REMOVIDO PARA CORRIGIR ERRO
     networks:
       - media-network
