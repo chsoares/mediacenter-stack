@@ -1,0 +1,332 @@
+version: "3.8"
+
+networks:
+  media-network:
+    name: media-network
+    driver: bridge
+
+services:
+  ###########################################################################
+  ##  Docker Compose File:    Gluetun (qmcgaw)
+  ##  Function:               VPN Client
+  ##  Documentation:          https://github.com/qdm12/gluetun-wiki
+  ###########################################################################
+  gluetun:
+    image: qmcgaw/gluetun:v3.35.0
+    container_name: gluetun
+    restart: always
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    ports:
+      # Gluetun Local Network HTTP proxy. You said you want 8888 free, so this would be a conflict.
+      # If you plan to use Gluetun as a proxy for your browser, change this to another port.
+      # For now, it's commented out as its primary role here is to secure other containers.
+      # - "8888:8888/tcp" # If enabled, ensure this port is not conflicting for your CTFs.
+      - "${WEBUI_PORT_QBITTORRENT:?err}:${WEBUI_PORT_QBITTORRENT:?err}"   # WebUI Portal: qBittorrent - Mapped for access to qBittorrent through Gluetun
+      - "${QBIT_PORT_TCP:?err}:6881/tcp"        # Transmission/qBittorrent Torrent Port TCP
+      - "${QBIT_PORT_UDP:?err}:6881/udp"        # Transmission/qBittorrent Torrent Port UDP
+
+    volumes:
+      - "${CONFIG_ROOT}/gluetun:/gluetun" # Mapped to /srv/mediacenter/config/gluetun
+    environment:
+      - PUID=${PUID:?err}
+      - PGID=${PGID:?err}
+      - TZ=${TIMEZONE:?err}
+      - VPN_SERVICE_PROVIDER=${VPN_SERVICE_PROVIDER:?err}
+      - SERVER_REGIONS=${SERVER_REGIONS}
+      - SERVER_COUNTRIES=${SERVER_COUNTRIES}
+      - SERVER_CITIES=${SERVER_CITIES}
+      - SERVER_HOSTNAMES=${SERVER_HOSTNAMES}
+      - FIREWALL_OUTBOUND_SUBNETS=${LOCAL_SUBNET:?err}
+      - OPENVPN_CUSTOM_CONFIG=${OPENVPN_CUSTOM_CONFIG}
+      - VPN_TYPE=${VPN_TYPE}
+      - VPN_ENDPOINT_IP=${VPN_ENDPOINT_IP}
+      - VPN_ENDPOINT_PORT=${VPN_ENDPOINT_PORT}
+      - WIREGUARD_PUBLIC_KEY=${WIREGUARD_PUBLIC_KEY}
+      - WIREGUARD_PRIVATE_KEY=${WIREGUARD_PRIVATE_KEY}
+      - WIREGUARD_PRESHARED_KEY=${WIREGUARD_PRESHARED_KEY}
+      - WIREGUARD_ADDRESSES=${WIREGUARD_ADDRESSES}
+      # - HTTPPROXY=on # Commented out to avoid 8888 conflict by default
+      # - SHADOWSOCKS=on # Commented out to avoid 8388 conflict by default
+
+    networks:
+      - media-network
+    healthcheck: # Added healthcheck for better dependency management
+      test: ["CMD", "/gluetun/healthcheck"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  ###########################################################################
+  ##  Docker Compose File:  qBittorrent (LinuxServer.io)
+  ##  Function:             Torrent Download Client
+  ##  Documentation:        https://docs.linuxserver.io/images/docker-qbittorrent
+  ###########################################################################
+  qbittorrent:
+    image: linuxserver/qbittorrent:4.6.0
+    container_name: qbittorrent
+    restart: unless-stopped
+    volumes:
+      - "${CONFIG_ROOT}/qbittorrent:/config" # Mapped to /srv/mediacenter/config/qbittorrent
+      - "${MEDIA_ROOT}/downloads:/downloads" # Mapped to /srv/mediacenter/data/downloads
+      - "${MEDIA_ROOT}/movies:/movies" # Mapped to /srv/mediacenter/data/movies (for hardlinks/atomic moves)
+      - "${MEDIA_ROOT}/series:/tv" # Mapped to /srv/mediacenter/data/series (for hardlinks/atomic moves)
+      - "${MEDIA_ROOT}/music:/music" # Mapped to /srv/mediacenter/data/music (for hardlinks/atomic moves)
+      # Add other media folders if qBittorrent needs to access them for downloads/moves
+    depends_on:
+      gluetun:
+        condition: service_healthy # Ensure VPN is up before qBittorrent tries to start
+    environment:
+      - PUID=${PUID:?err}
+      - PGID=${PGID:?err}
+      - UMASK=${UMASK:?err}
+      - TZ=${TIMEZONE:?err}
+      - WEBUI_PORT=${WEBUI_PORT_QBITTORRENT:?err} # Internal port, exposed via Gluetun
+    network_mode: "service:gluetun" # All traffic goes through Gluetun VPN
+
+  ###########################################################################
+  ##  Docker Compose File:  Plex Media Server (LinuxServer.io)
+  ##  Function:             Media Server
+  ##  Documentation:        https://docs.linuxserver.io/images/docker-plex
+  ###########################################################################
+  plex:
+    image: lscr.io/linuxserver/plex:latest
+    container_name: plex
+    restart: unless-stopped
+    environment:
+      - PUID=${PUID:?err}
+      - PGID=${PGID:?err}
+      - UMASK=${UMASK:?err}
+      - TZ=${TIMEZONE:?err}
+      - VERSION=docker # Recommended by LinuxServer.io for Plex
+      # - ADVERTISE_IP=http://<YOUR_LOCAL_IP>:32400/ # Uncomment and set your Arch host IP if you have issues with discovery/remote access
+    volumes:
+      - "${CONFIG_ROOT}/plex:/config" # Mapped to /srv/mediacenter/config/plex
+      - "${MEDIA_ROOT}/movies:/movies" # Mapped to /srv/mediacenter/data/movies
+      - "${MEDIA_ROOT}/series:/tv" # Mapped to /srv/mediacenter/data/series
+      - "${MEDIA_ROOT}/music:/music" # Mapped to /srv/mediacenter/data/music
+      # Add other media folders from /srv/mediacenter/data as needed
+    ports:
+      - "${WEBUI_PORT_PLEX:?err}:32400" # Main Web UI / Media Server Port (e.g., 32400)
+      - "3005:3005/tcp" # Plex Companion
+      - "8324:8324/tcp" # Plex DLNA
+      - "32410:32410/udp" # GDM (Bonjour/SSDP)
+      - "32412:32412/udp" # GDM (Bonjour/SSDP)
+      - "32413:32413/udp" # GDM (Bonjour/SSDP)
+      - "32414:32414/udp" # GDM (Bonjour/SSDP)
+      - "32469:32469/tcp" # Plex DLNA
+      # DLNA Discover, if enabled, ensures this does not conflict with your CTF ports
+      # - "1900:1900/udp" # If enabled, ensure this port is not conflicting for your CTFs.
+    deploy: # Hardware acceleration for NVIDIA GPU
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1 # or all, if you have multiple GPUs and want to use them all
+              capabilities: [gpu]
+    networks:
+      - media-network
+
+  ###########################################################################
+  ##  Docker Compose File:  Overseerr (sct)
+  ##  Function:             Media Request Manager (for Plex/Emby/Jellyfin)
+  ##  Documentation:        https://docs.overseerr.dev/getting-started/docker
+  ###########################################################################
+  overseerr:
+    image: sct/overseerr:latest # Using the official Overseerr image
+    container_name: overseerr
+    restart: unless-stopped
+    volumes:
+      - "${CONFIG_ROOT}/overseerr:/app/config" # Mapped to /srv/mediacenter/config/overseerr
+    ports:
+      - "${WEBUI_PORT_OVERSEERR:?err}:5055" # Default Overseerr Web UI port
+    environment:
+      - PUID=${PUID:?err}
+      - PGID=${PGID:?err}
+      - UMASK_SET=${UMASK:?err} # Overseerr uses UMASK_SET instead of UMASK
+      - TZ=${TIMEZONE:?err}
+    networks:
+      - media-network
+    depends_on:
+      - plex # Overseerr needs Plex to be up to connect to it.
+
+  ###########################################################################
+  ##  Docker Compose File:  Lidarr (LinuxServer.io)
+  ##  Function:             Music Library Manager
+  ##  Documentation:        https://docs.linuxserver.io/images/docker-lidarr
+  ###########################################################################
+  lidarr:
+    image: lscr.io/linuxserver/lidarr:latest
+    container_name: lidarr
+    restart: unless-stopped
+    volumes:
+      - "${CONFIG_ROOT}/lidarr:/config" # Mapped to /srv/mediacenter/config/lidarr
+      - "${MEDIA_ROOT}:/data" # Mapped to /srv/mediacenter/data (for import/hardlinks)
+    ports:
+      - "${WEBUI_PORT_LIDARR:?err}:8686"
+    environment:
+      - PUID=${PUID:?err}
+      - PGID=${PGID:?err}
+      - TZ=${TIMEZONE:?err}
+      - DOCKER_MODS=ghcr.io/gilbn/theme.park:lidarr
+      - TP_THEME=${TP_THEME:?err}
+    networks:
+      - media-network
+
+  ###########################################################################
+  ##  Docker Compose File:  Prowlarr (LinuxServer.io)
+  ##  Function:             Indexer and Search Manager
+  ##  Documentation:        https://docs.linuxserver.io/images/docker-prowlarr
+  ###########################################################################
+  prowlarr:
+    image: lscr.io/linuxserver/prowlarr:latest
+    container_name: prowlarr
+    restart: unless-stopped
+    volumes:
+      - "${CONFIG_ROOT}/prowlarr:/config" # Mapped to /srv/mediacenter/config/prowlarr
+    ports:
+      - "${WEBUI_PORT_PROWLARR:?err}:9696"
+    environment:
+      - PUID=${PUID:?err}
+      - PGID=${PGID:?err}
+      - TZ=${TIMEZONE:?err}
+      - DOCKER_MODS=ghcr.io/gilbn/theme.park:prowlarr
+      - TP_THEME=${TP_THEME:?err}
+    networks:
+      - media-network
+
+  ###########################################################################
+  ##  Docker Compose File:  Radarr (LinuxServer.io)
+  ##  Function:             Movie Library Manager
+  ##  Documentation:        https://docs.linuxserver.io/images/docker-radarr
+  ###########################################################################
+  radarr:
+    image: lscr.io/linuxserver/radarr:latest
+    container_name: radarr
+    restart: unless-stopped
+    volumes:
+      - "${CONFIG_ROOT}/radarr:/config" # Mapped to /srv/mediacenter/config/radarr
+      - "${MEDIA_ROOT}:/data" # Mapped to /srv/mediacenter/data (for import/hardlinks)
+    ports:
+      - "${WEBUI_PORT_RADARR:?err}:7878"
+    environment:
+      - PUID=${PUID:?err}
+      - PGID=${PGID:?err}
+      - TZ=${TIMEZONE:?err}
+      - DOCKER_MODS=ghcr.io/gilbn/theme.park:radarr
+      - TP_THEME=${TP_THEME:?err}
+    networks:
+      - media-network
+
+  ###########################################################################
+  ##  Docker Compose File:  Sonarr (LinuxServer.io)
+  ##  Function:             Series Library Manager (TV Shows)
+  ##  Documentation:        https://docs.linuxserver.io/images/docker-sonarr
+  ###########################################################################
+  sonarr:
+    image: lscr.io/linuxserver/sonarr:latest
+    container_name: sonarr
+    restart: unless-stopped
+    volumes:
+      - "${CONFIG_ROOT}/sonarr:/config" # Mapped to /srv/mediacenter/config/sonarr
+      - "${MEDIA_ROOT}:/data" # Mapped to /srv/mediacenter/data (for import/hardlinks)
+    ports:
+      - "${WEBUI_PORT_SONARR:?err}:8989"
+    environment:
+      - PUID=${PUID:?err}
+      - PGID=${PGID:?err}
+      - TZ=${TIMEZONE:?err}
+      - DOCKER_MODS=ghcr.io/gilbn/theme.park:sonarr
+      - TP_THEME=${TP_THEME:?err}
+    networks:
+      - media-network
+
+  ###########################################################################
+  ##  Docker Compose File:  Flaresolverr (Flaresolverr)
+  ##  Function:             Cloudflare Proxy Server
+  ##  Documentation:        https://github.com/FlareSolverr/FlareSolverr
+  ###########################################################################
+  flaresolverr:
+    image: ghcr.io/flaresolverr/flaresolverr:latest
+    container_name: flaresolverr
+    restart: unless-stopped
+    ports:
+      - "${FLARESOLVERR_PORT:?err}:8191"
+    environment:
+      - LOG_LEVEL=info
+      - LOG_HTML=false
+      - CAPTCHA_SOLVER=none
+      - TZ=${TIMEZONE:?err}
+    networks:
+      - media-network
+
+  ###########################################################################
+  ##  Docker Compose File:  Unpackerr (Golift)
+  ##  Function:             Archive Media Extraction
+  ##  Documentation:        https://github.com/davidnewhall/unpackerr
+  ###########################################################################
+  unpackerr:
+    image: golift/unpackerr:latest
+    container_name: unpackerr
+    restart: unless-stopped
+    volumes:
+      - "${CONFIG_ROOT}/unpackerr:/config" # Mapped to /srv/mediacenter/config/unpackerr
+      - "${MEDIA_ROOT}:/data" # Mapped to /srv/mediacenter/data
+    environment:
+      - PUID=${PUID:?err}
+      - PGID=${PGID:?err}
+      - UMASK=${UMASK:?err}
+      - TZ=${TIMEZONE:?err}
+      - UN_DEBUG=false
+      - UN_INTERVAL=2m
+      - UN_START_DELAY=1m
+      # Sonarr Config
+      - UN_SONARR_0_URL=http://sonarr:8989 # Uses internal Docker DNS name
+      - UN_SONARR_0_API_KEY=${SONARR_API_KEY} # Will be filled by automation script
+      - UN_SONARR_0_PATHS_0=/data/downloads/complete # Point to where completed downloads are
+      - UN_SONARR_0_PROTOCOLS=torrent
+      # Radarr Config
+      - UN_RADARR_0_URL=http://radarr:7878 # Uses internal Docker DNS name
+      - UN_RADARR_0_API_KEY=${RADARR_API_KEY} # Will be filled by automation script
+      - UN_RADARR_0_PATHS_0=/data/downloads/complete # Point to where completed downloads are
+      - UN_RADARR_0_PROTOCOLS=torrent
+      # Lidarr Config
+      - UN_LIDARR_0_URL=http://lidarr:8686 # Uses internal Docker DNS name
+      - UN_LIDARR_0_API_KEY=${LIDARR_API_KEY} # Will be filled by automation script
+      - UN_LIDARR_0_PATHS_0=/data/downloads/complete # Point to where completed downloads are
+      - UN_LIDARR_0_PROTOCOLS=torrent
+    security_opt:
+      - no-new-privileges:true
+    # This container does not need Internet access, it only interacts with other containers locally
+    network_mode: none # This is fine if it only talks to the *ARR apps via API calls, which it does.
+    # If Unpackerr needed internet access, it would use media-network
+
+  ###########################################################################
+  ##  Docker Compose File:  Watchtower (Container Solutions)
+  ##  Function:             Automated Docker Container Updates
+  ##  Documentation:        https://containrrr.dev/watchtower/
+  ###########################################################################
+  watchtower:
+    image: containrrr/watchtower:latest
+    container_name: watchtower
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock # Essential for Watchtower to communicate with Docker daemon
+    environment:
+      - PUID=${PUID:?err} # Watchtower often runs as root, but safe to set for consistency
+      - PGID=${PGID:?err}
+      - TZ=${TIMEZONE:?err}
+      - WATCHTOWER_POLL_INTERVAL=21600 # Check for updates every 6 hours (60 * 60 * 6 = 21600 seconds)
+      - WATCHTOWER_CLEANUP=true # Remove old images after update
+      - WATCHTOWER_NOTIFICATIONS=none # No notifications for now
+      # - WATCHTOWER_INCLUDE_RESTARTING=true # Optional: include containers currently restarting
+      # - WATCHTOWER_LABEL_ENABLE=true # Only update containers with the label com.centurylinklabs.watchtower.enable=true
+      # - WATCHTOWER_NO_STARTUP_MESSAGE=true # Suppress startup message
+      # - WATCHTOWER_DEBUG=false
+    # You might expose this for metrics, but not strictly necessary for basic function
+    # ports:
+    #   - "${WEBUI_PORT_WATCHTOWER:?err}:8080" # If Watchtower's default port 8080 is for metrics/API
+    networks:
+      - media-network
