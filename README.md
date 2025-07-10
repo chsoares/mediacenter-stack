@@ -436,3 +436,12 @@ Este `README.md` cobre a instalação, setup de diretórios, variáveis de ambie
 Revise-o para ter certeza de que todos os caminhos e valores padrão fazem sentido para você e seu ambiente específico. Por exemplo, ajuste os placeholders como `<YOUR_ARCH_HOST_IP>`.
 
 Podemos refinar qualquer seção ou adicionar mais detalhes conforme avançamos na configuração! Qual o próximo app que você gostaria de configurar? (Sonarr ou Lidarr geralmente vêm a seguir, pois são muito parecidos com o Radarr).
+
+## Useful links
+https://www.synoforum.com/resources/ultimate-starter-page-1-jellyfin-jellyseerr-nzbget-torrents-and-arr-media-library-stack.184/
+https://blog.kye.dev/proxmox-servarr-stack
+https://github.com/AdrienPoupa/docker-compose-nas/tree/master?tab=readme-ov-file#qbittorrent
+https://www.gravee.dev/en/setup-nvidia-gpu-for-docker/
+https://www.gravee.dev/en/configs/docker-compose/plex/
+https://www.reddit.com/r/PleX/comments/virmxi/guide_plex_transcoding_with_docker_nvidia_gpu/
+https://www.reddit.com/r/selfhosted/comments/w559xa/jellyfin_nvidia_in_docker_a_guide_for_newbies/

@@ -69,14 +69,14 @@ services:
   ##  Documentation:        https://docs.linuxserver.io/images/docker-qbittorrent
   ###########################################################################
   qbittorrent:
-    image: linuxserver/qbittorrent:4.6.0
+    image: linuxserver/qbittorrent:latest
     container_name: qbittorrent
     restart: unless-stopped
     volumes:
       - "${CONFIG_ROOT}/qbittorrent:/config" # Mapped to /srv/mediacenter/config/qbittorrent
       - "${MEDIA_ROOT}/downloads:/downloads" # Mapped to /srv/mediacenter/data/downloads
       - "${MEDIA_ROOT}/movies:/movies" # Mapped to /srv/mediacenter/data/movies (for hardlinks/atomic moves)
-      - "${MEDIA_ROOT}/series:/tv" # Mapped to /srv/mediacenter/data/series (for hardlinks/atomic moves)
+      - "${MEDIA_ROOT}/tv:/tv" # Mapped to /srv/mediacenter/data/tv (for hardlinks/atomic moves)
       - "${MEDIA_ROOT}/music:/music" # Mapped to /srv/mediacenter/data/music (for hardlinks/atomic moves)
       # Add other media folders if qBittorrent needs to access them for downloads/moves
     depends_on:
@@ -105,11 +105,11 @@ services:
       - UMASK=${UMASK:?err}
       - TZ=${TIMEZONE:?err}
       - VERSION=docker # Recommended by LinuxServer.io for Plex
-      # - ADVERTISE_IP=http://<YOUR_LOCAL_IP>:32400/ # Uncomment and set your Arch host IP if you have issues with discovery/remote access
+      - ADVERTISE_IP=http://${LOCAL_HOST_IP}:32400/ # Uncomment and set your Arch host IP if you have issues with discovery/remote access
     volumes:
       - "${CONFIG_ROOT}/plex:/config" # Mapped to /srv/mediacenter/config/plex
       - "${MEDIA_ROOT}/movies:/movies" # Mapped to /srv/mediacenter/data/movies
-      - "${MEDIA_ROOT}/series:/tv" # Mapped to /srv/mediacenter/data/series
+      - "${MEDIA_ROOT}/tv:/tv" # Mapped to /srv/mediacenter/data/tv
       - "${MEDIA_ROOT}/music:/music" # Mapped to /srv/mediacenter/data/music
       # Add other media folders from /srv/mediacenter/data as needed
     ports:
@@ -325,5 +325,57 @@ services:
       - WATCHTOWER_POLL_INTERVAL=21600 # Check for updates every 6 hours (60 * 60 * 6 = 21600 seconds)
       - WATCHTOWER_CLEANUP=true # Remove old images after update
       # - WATCHTOWER_NOTIFICATIONS=none # REMOVIDO PARA CORRIGIR ERRO
+    networks:
+      - media-network
+
+  ###########################################################################
+  ##  Docker Compose File:    Bazarr (LinuxServer.io)
+  ##  Function:               Subtitle Manager
+  ##  Documentation:          https://docs.linuxserver.io/images/docker-bazarr
+  ###########################################################################
+  bazarr:
+    image: lscr.io/linuxserver/bazarr:latest
+    container_name: bazarr
+    restart: unless-stopped
+    volumes:
+      - "${CONFIG_ROOT}/bazarr:/config" # Mapped to /srv/mediacenter/config/bazarr
+      - "${MEDIA_ROOT}:/data" # Mapped to /srv/mediacenter/data/
+
+    ports:
+      - "${WEBUI_PORT_BAZARR:?err}:6767" # Default Bazarr Web UI port
+    environment:
+      - PUID=${PUID:?err}
+      - PGID=${PGID:?err}
+      - UMASK=${UMASK:?err}
+      - TZ=${TIMEZONE:?err}
+    networks:
+      - media-network
+    depends_on:
+      - radarr
+      - sonarr
+
+  ###########################################################################
+  ##  Docker Compose File:    Syncthing (LinuxServer.io)
+  ##  Function:               File Synchronization
+  ##  Documentation:          https://docs.linuxserver.io/images/docker-syncthing
+  ###########################################################################
+  syncthing:
+    image: lscr.io/linuxserver/syncthing:latest
+    container_name: syncthing
+    restart: unless-stopped
+    ports:
+      - "${WEBUI_PORT_SYNCTHING:?err}:8384" # Syncthing Web UI
+      - "22000:22000/tcp" # Syncthing data transfer (TCP)
+      - "22000:22000/udp" # Syncthing data transfer (UDP)
+      - "21027:21027/udp" # Syncthing discovery (UDP)
+    volumes:
+      - "${CONFIG_ROOT}/syncthing:/config" # Syncthing configuration
+      - "${MEDIA_ROOT}/downloads:/downloads" # Shared volume for downloaded content
+      # Add other media folders here if you want Syncthing to manage them (e.g., movies, tv)
+    environment:
+      - PUID=${PUID:?err}
+      - PGID=${PGID:?err}
+      - TZ=${TIMEZONE:?err}
+      - UMASK=${UMASK:?err} # Ensure correct permissions on synced files
     networks:
       - media-network
